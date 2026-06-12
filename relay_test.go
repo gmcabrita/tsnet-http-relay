@@ -82,6 +82,25 @@ func TestParseHostAllowlistRejectsURLs(t *testing.T) {
 	}
 }
 
+func TestRelayHealthz(t *testing.T) {
+	client := &recordingClient{}
+	relay := NewRelay(testConfig(t), client)
+
+	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	response := httptest.NewRecorder()
+	relay.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if response.Body.String() != "ok\n" {
+		t.Fatalf("body = %q", response.Body.String())
+	}
+	if client.request.URL != "" {
+		t.Fatal("client should not be called")
+	}
+}
+
 func TestRelayForwardsAllowedRequest(t *testing.T) {
 	client := &recordingClient{response: OutboundResponse{
 		StatusCode: http.StatusCreated,

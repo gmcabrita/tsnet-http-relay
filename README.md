@@ -87,6 +87,18 @@ Forwarded when provided:
 - `Accept-Language`
 - `Referer`
 
+Healthcheck:
+
+```sh
+curl "https://laptop-relay.your-tailnet.ts.net/healthz"
+```
+
+Returns:
+
+```text
+ok
+```
+
 Cloudflare Worker:
 
 ```ts
