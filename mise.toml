@@ -1,0 +1,41 @@
+[tools]
+go = "1.26.4"
+
+[tasks.fmt]
+description = "Format Go files"
+run = [
+  "find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go run golang.org/x/tools/cmd/goimports@latest -w",
+  "find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go run mvdan.cc/gofumpt@latest -w",
+]
+
+[tasks.lint]
+description = "Run Go linters"
+run = [
+  "test -z \"$(find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go run golang.org/x/tools/cmd/goimports@latest -l)\"",
+  "test -z \"$(find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go run mvdan.cc/gofumpt@latest -l)\"",
+  "go vet ./...",
+  "go run golang.org/x/vuln/cmd/govulncheck@latest ./...",
+  "go run honnef.co/go/tools/cmd/staticcheck@latest ./...",
+  "go run github.com/kisielk/errcheck@latest ./...",
+]
+
+[tasks.test]
+description = "Run tests"
+run = "go test ./..."
+
+[tasks.build]
+description = "Build binary"
+run = "go build -o tsnet-http-relay ."
+
+[tasks.clean]
+description = "Remove build outputs"
+run = "rm -f tsnet-http-relay"
+
+[tasks.check]
+description = "Format, lint, test, build"
+run = [
+  "mise run fmt",
+  "mise run lint",
+  "mise run test",
+  "mise run build",
+]
