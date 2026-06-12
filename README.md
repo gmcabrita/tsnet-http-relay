@@ -222,6 +222,20 @@ tail -f ~/Library/Logs/tsnet-http-relay/stdout.log
 tail -f ~/Library/Logs/tsnet-http-relay/stderr.log
 ```
 
+Restart:
+
+```sh
+launchctl kickstart -k "gui/$(id -u)/com.gmcabrita.tsnet-http-relay"
+```
+
+If you changed the plist, reload it:
+
+```sh
+launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.gmcabrita.tsnet-http-relay.plist
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.gmcabrita.tsnet-http-relay.plist
+launchctl kickstart -k "gui/$(id -u)/com.gmcabrita.tsnet-http-relay"
+```
+
 Stop:
 
 ```sh
