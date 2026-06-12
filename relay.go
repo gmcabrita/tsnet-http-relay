@@ -150,8 +150,8 @@ func (relay Relay) buildOutboundRequest(w http.ResponseWriter, r *http.Request) 
 	if err != nil || targetURL == nil || targetURL.Host == "" {
 		return OutboundRequest{}, relayHTTPError{status: http.StatusBadRequest, message: "bad url"}
 	}
-	if targetURL.Scheme != "https" {
-		return OutboundRequest{}, relayHTTPError{status: http.StatusBadRequest, message: "https target required"}
+	if !allowedScheme(targetURL.Scheme) {
+		return OutboundRequest{}, relayHTTPError{status: http.StatusBadRequest, message: "http or https target required"}
 	}
 	if !relay.config.AllowedHosts.Allows(targetURL.Hostname()) {
 		return OutboundRequest{}, relayHTTPError{status: http.StatusForbidden, message: "host not allowed"}
@@ -230,6 +230,15 @@ func targetURLValue(r *http.Request) string {
 
 func targetMethodValue(r *http.Request) string {
 	return strings.ToUpper(r.Method)
+}
+
+func allowedScheme(scheme string) bool {
+	switch strings.ToLower(scheme) {
+	case "http", "https":
+		return true
+	default:
+		return false
+	}
 }
 
 func allowedMethod(method string) bool {

@@ -278,13 +278,31 @@ func TestRelayRejectsUnauthorizedRequest(t *testing.T) {
 	}
 }
 
-func TestRelayRejectsNonHTTPSTarget(t *testing.T) {
-	client := &recordingClient{}
+func TestRelayAllowsHTTPTarget(t *testing.T) {
+	client := &recordingClient{response: OutboundResponse{StatusCode: http.StatusOK}}
 	relay := NewRelay(testConfig(t), client)
 
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	request.Header.Set("X-Target-Url", "http://example.com/")
+	response := httptest.NewRecorder()
+	relay.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if client.request.URL != "http://example.com/" {
+		t.Fatalf("target url = %q", client.request.URL)
+	}
+}
+
+func TestRelayRejectsUnsupportedScheme(t *testing.T) {
+	client := &recordingClient{}
+	relay := NewRelay(testConfig(t), client)
+
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("X-Target-Url", "ftp://example.com/")
 	response := httptest.NewRecorder()
 	relay.ServeHTTP(response, request)
 

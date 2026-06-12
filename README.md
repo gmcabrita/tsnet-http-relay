@@ -34,7 +34,7 @@ Funnel listeners must use `:443`, `:8443`, or `:10000`.
 ```sh
 export TS_AUTHKEY="tskey-auth-..." # optional after first auth
 export RELAY_TOKEN="$(openssl rand -base64 32)"
-export RELAY_ALLOWED_HOSTS="*" # arbitrary HTTPS target hosts
+export RELAY_ALLOWED_HOSTS="*" # arbitrary HTTP(S) target hosts
 
 go run .
 ```
@@ -47,7 +47,7 @@ Defaults:
 - `RELAY_TIMEOUT=30s`
 - `RELAY_MAX_BODY_BYTES=10485760`
 
-`RELAY_ALLOWED_HOSTS="*"` allows arbitrary HTTPS target hosts. Use `RELAY_ALLOWED_HOSTS="ifconfig.me,example.com"` to restrict to exact hosts.
+`RELAY_ALLOWED_HOSTS="*"` allows arbitrary HTTP(S) target hosts. Use `RELAY_ALLOWED_HOSTS="ifconfig.me,example.com"` to restrict to exact hosts.
 
 Optional CycleTLS knobs:
 
@@ -112,7 +112,7 @@ Relay requires:
 
 - bearer token via `Authorization: Bearer ...`
 - exact host allowlist via `RELAY_ALLOWED_HOSTS`, unless set to `*`
-- HTTPS initial target URLs only
+- HTTP and HTTPS target URLs only
 - redirects followed by default
 - hop-by-hop/proxy headers stripped
 - relay auth / control headers not forwarded upstream
