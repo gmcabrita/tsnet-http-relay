@@ -66,17 +66,15 @@ Avoid `RELAY_INSECURE_SKIP_VERIFY=true` unless debugging.
 ## Call
 
 ```sh
-curl "https://laptop-relay.your-tailnet.ts.net/relay" \
-  -H "Authorization: Bearer $RELAY_TOKEN" \
-  -H "X-Target-Url: https://ifconfig.me"
+curl "https://laptop-relay.your-tailnet.ts.net/https://ifconfig.me" \
+  -H "Authorization: Bearer $RELAY_TOKEN"
 ```
 
 Use the inbound method as the outbound method:
 
 ```sh
-curl -X PATCH "https://laptop-relay.your-tailnet.ts.net/relay" \
+curl -X PATCH "https://laptop-relay.your-tailnet.ts.net/https://example.com/resource" \
   -H "Authorization: Bearer $RELAY_TOKEN" \
-  -H "X-Target-Url: https://example.com/resource" \
   --data '{"ok":true}'
 ```
 
@@ -104,10 +102,9 @@ Cloudflare Worker:
 ```ts
 export default {
   async fetch(_req: Request, env: Env): Promise<Response> {
-    return fetch("https://laptop-relay.your-tailnet.ts.net/relay", {
+    return fetch("https://laptop-relay.your-tailnet.ts.net/https://ifconfig.me", {
       headers: {
         authorization: `Bearer ${env.RELAY_TOKEN}`,
-        "x-target-url": "https://ifconfig.me",
       },
     });
   },
@@ -129,7 +126,7 @@ Relay requires:
 - hop-by-hop/proxy headers stripped
 - relay auth / control headers not forwarded upstream
 
-Target URL must be provided via `X-Target-Url`.
+Target URL must be provided as the request path: `https://relay-host/https://target-host/path`.
 
 Supported methods: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`. The inbound method is used as the outbound method.
 

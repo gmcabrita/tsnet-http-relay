@@ -113,9 +113,8 @@ func TestRelayForwardsAllowedRequest(t *testing.T) {
 	}}
 	relay := NewRelay(testConfig(t), client)
 
-	request := httptest.NewRequest(http.MethodPost, "/relay", strings.NewReader("payload"))
+	request := httptest.NewRequest(http.MethodPost, "/https://example.com/path?q=1", strings.NewReader("payload"))
 	request.Header.Set("Authorization", "Bearer secret")
-	request.Header.Set("X-Target-Url", "https://example.com/path?q=1")
 	request.Header.Set("User-Agent", "worker-agent")
 	request.Header.Set("X-Custom", "custom")
 	request.Header.Set("X-Forwarded-For", "203.0.113.1")
@@ -193,8 +192,8 @@ func TestRelayRejectsTargetURLQueryParam(t *testing.T) {
 	}
 }
 
-func TestRelayAcceptsTargetURLHeader(t *testing.T) {
-	client := &recordingClient{response: OutboundResponse{StatusCode: http.StatusOK}}
+func TestRelayRejectsTargetURLHeader(t *testing.T) {
+	client := &recordingClient{}
 	relay := NewRelay(testConfig(t), client)
 
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -203,11 +202,62 @@ func TestRelayAcceptsTargetURLHeader(t *testing.T) {
 	response := httptest.NewRecorder()
 	relay.ServeHTTP(response, request)
 
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if client.request.URL != "" {
+		t.Fatal("client should not be called")
+	}
+}
+
+func TestRelayAcceptsTargetURLPath(t *testing.T) {
+	client := &recordingClient{response: OutboundResponse{StatusCode: http.StatusOK}}
+	relay := NewRelay(testConfig(t), client)
+
+	request := httptest.NewRequest(http.MethodGet, "/https://example.com/from-path?q=1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	relay.ServeHTTP(response, request)
+
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d", response.Code)
 	}
-	if client.request.URL != "https://example.com/from-header" {
+	if client.request.URL != "https://example.com/from-path?q=1" {
 		t.Fatalf("target url = %q", client.request.URL)
+	}
+}
+
+func TestRelayRejectsRelayPath(t *testing.T) {
+	client := &recordingClient{}
+	relay := NewRelay(testConfig(t), client)
+
+	request := httptest.NewRequest(http.MethodGet, "/relay", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	relay.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if client.request.URL != "" {
+		t.Fatal("client should not be called")
+	}
+}
+
+func TestRelayRejectsUnknownPath(t *testing.T) {
+	client := &recordingClient{}
+	relay := NewRelay(testConfig(t), client)
+
+	request := httptest.NewRequest(http.MethodGet, "/unknown", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	relay.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if client.request.URL != "" {
+		t.Fatal("client should not be called")
 	}
 }
 
@@ -217,9 +267,8 @@ func TestRelayPassesRedirectConfig(t *testing.T) {
 	config.DisableRedirects = true
 	relay := NewRelay(config, client)
 
-	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request := httptest.NewRequest(http.MethodGet, "/https://example.com/", nil)
 	request.Header.Set("Authorization", "Bearer secret")
-	request.Header.Set("X-Target-Url", "https://example.com/")
 	response := httptest.NewRecorder()
 	relay.ServeHTTP(response, request)
 
@@ -235,9 +284,8 @@ func TestRelayForwardsBrowserHeaders(t *testing.T) {
 	client := &recordingClient{response: OutboundResponse{StatusCode: http.StatusOK}}
 	relay := NewRelay(testConfig(t), client)
 
-	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request := httptest.NewRequest(http.MethodGet, "/https://example.com/", nil)
 	request.Header.Set("Authorization", "Bearer secret")
-	request.Header.Set("X-Target-Url", "https://example.com/")
 	request.Header.Set("User-Agent", "browser-agent")
 	request.Header.Set("Accept", "text/html")
 	request.Header.Set("Accept-Language", "en-US,en;q=0.9")
@@ -266,9 +314,8 @@ func TestRelayUsesDefaultUserAgent(t *testing.T) {
 	client := &recordingClient{response: OutboundResponse{StatusCode: http.StatusOK}}
 	relay := NewRelay(testConfig(t), client)
 
-	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request := httptest.NewRequest(http.MethodGet, "/https://example.com/", nil)
 	request.Header.Set("Authorization", "Bearer secret")
-	request.Header.Set("X-Target-Url", "https://example.com/")
 
 	response := httptest.NewRecorder()
 	relay.ServeHTTP(response, request)
@@ -301,9 +348,8 @@ func TestRelayAllowsHTTPTarget(t *testing.T) {
 	client := &recordingClient{response: OutboundResponse{StatusCode: http.StatusOK}}
 	relay := NewRelay(testConfig(t), client)
 
-	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request := httptest.NewRequest(http.MethodGet, "/http://example.com/", nil)
 	request.Header.Set("Authorization", "Bearer secret")
-	request.Header.Set("X-Target-Url", "http://example.com/")
 	response := httptest.NewRecorder()
 	relay.ServeHTTP(response, request)
 
@@ -319,9 +365,8 @@ func TestRelayRejectsUnsupportedScheme(t *testing.T) {
 	client := &recordingClient{}
 	relay := NewRelay(testConfig(t), client)
 
-	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request := httptest.NewRequest(http.MethodGet, "/ftp://example.com/", nil)
 	request.Header.Set("Authorization", "Bearer secret")
-	request.Header.Set("X-Target-Url", "ftp://example.com/")
 	response := httptest.NewRecorder()
 	relay.ServeHTTP(response, request)
 
@@ -337,9 +382,8 @@ func TestRelayRejectsDisallowedHost(t *testing.T) {
 	client := &recordingClient{}
 	relay := NewRelay(testConfig(t), client)
 
-	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request := httptest.NewRequest(http.MethodGet, "/https://blocked.example/", nil)
 	request.Header.Set("Authorization", "Bearer secret")
-	request.Header.Set("X-Target-Url", "https://blocked.example/")
 	response := httptest.NewRecorder()
 	relay.ServeHTTP(response, request)
 
@@ -361,9 +405,8 @@ func TestRelayWildcardAllowlistForwardsArbitraryHost(t *testing.T) {
 	}
 	relay := NewRelay(config, client)
 
-	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request := httptest.NewRequest(http.MethodGet, "/https://blocked.example/path", nil)
 	request.Header.Set("Authorization", "Bearer secret")
-	request.Header.Set("X-Target-Url", "https://blocked.example/path")
 	response := httptest.NewRecorder()
 	relay.ServeHTTP(response, request)
 
@@ -381,9 +424,8 @@ func TestRelayRejectsOversizedBody(t *testing.T) {
 	config.MaxBodyBytes = 3
 	relay := NewRelay(config, client)
 
-	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("1234"))
+	request := httptest.NewRequest(http.MethodPost, "/https://example.com/", strings.NewReader("1234"))
 	request.Header.Set("Authorization", "Bearer secret")
-	request.Header.Set("X-Target-Url", "https://example.com/")
 	response := httptest.NewRecorder()
 	relay.ServeHTTP(response, request)
 
@@ -399,9 +441,8 @@ func TestRelayRejectsConnect(t *testing.T) {
 	client := &recordingClient{}
 	relay := NewRelay(testConfig(t), client)
 
-	request := httptest.NewRequest(http.MethodConnect, "/", nil)
+	request := httptest.NewRequest(http.MethodConnect, "/https://example.com/", nil)
 	request.Header.Set("Authorization", "Bearer secret")
-	request.Header.Set("X-Target-Url", "https://example.com/")
 	response := httptest.NewRecorder()
 	relay.ServeHTTP(response, request)
 

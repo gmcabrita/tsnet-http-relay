@@ -117,7 +117,7 @@ func (relay Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.URL.Path != "/" && r.URL.Path != "/relay" {
+	if !relayPath(r.URL.Path) && targetURLFromPath(r) == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -225,7 +225,22 @@ func authorized(header string, token string) bool {
 }
 
 func targetURLValue(r *http.Request) string {
-	return r.Header.Get("x-target-url")
+	return targetURLFromPath(r)
+}
+
+func targetURLFromPath(r *http.Request) string {
+	path := strings.TrimPrefix(r.URL.EscapedPath(), "/")
+	if _, _, ok := strings.Cut(path, "://"); !ok {
+		return ""
+	}
+	if r.URL.RawQuery == "" {
+		return path
+	}
+	return path + "?" + r.URL.RawQuery
+}
+
+func relayPath(path string) bool {
+	return path == "/"
 }
 
 func targetMethodValue(r *http.Request) string {
