@@ -140,6 +140,7 @@ Build and install:
 mise run build
 mkdir -p ~/.local/bin
 cp ./tsnet-http-relay ~/.local/bin/tsnet-http-relay
+chmod +x ~/.local/bin/tsnet-http-relay
 ```
 
 Create env file:
@@ -269,6 +270,7 @@ Build and install:
 mise run build
 mkdir -p ~/.local/bin
 cp ./tsnet-http-relay ~/.local/bin/tsnet-http-relay
+chmod +x ~/.local/bin/tsnet-http-relay
 ```
 
 Create env file:
@@ -347,6 +349,29 @@ Check:
 ```sh
 systemctl --user status tsnet-http-relay.service
 journalctl --user -u tsnet-http-relay.service -f
+```
+
+If service fails with `Permission denied`, check executable bits:
+
+```sh
+chmod +x ~/.local/bin/tsnet-http-relay
+chmod +x ~/.local/bin/tsnet-http-relay-systemd
+systemctl --user restart tsnet-http-relay.service
+```
+
+If it still fails, check for a `noexec` home mount:
+
+```sh
+findmnt -no OPTIONS -T ~/.local/bin/tsnet-http-relay
+```
+
+If output contains `noexec`, install outside home:
+
+```sh
+sudo cp ~/.local/bin/tsnet-http-relay /usr/local/bin/tsnet-http-relay
+sudo chmod +x /usr/local/bin/tsnet-http-relay
+perl -0777 -pi -e 's#exec "\$HOME/\.local/bin/tsnet-http-relay"#exec /usr/local/bin/tsnet-http-relay#' ~/.local/bin/tsnet-http-relay-systemd
+systemctl --user restart tsnet-http-relay.service
 ```
 
 Restart:
