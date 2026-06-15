@@ -4,3 +4,4 @@ tsnet-state/
 .DS_Store
 .hegel/
 .pi/
+dist/
