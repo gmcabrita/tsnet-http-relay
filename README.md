@@ -258,3 +258,114 @@ Keep Mac awake if needed:
 ```sh
 sudo pmset -a sleep 0
 ```
+
+## Run as a service on Linux (systemd)
+
+Use a systemd user service.
+
+Build and install:
+
+```sh
+mise run build
+mkdir -p ~/.local/bin
+cp ./tsnet-http-relay ~/.local/bin/tsnet-http-relay
+```
+
+Create env file:
+
+```sh
+mkdir -p ~/.config/tsnet-http-relay ~/.local/state/tsnet-http-relay
+chmod 700 ~/.config/tsnet-http-relay
+
+cat > ~/.config/tsnet-http-relay/env <<'EOF'
+export RELAY_TOKEN="replace-me"
+export RELAY_ALLOWED_HOSTS="*"
+export TSNET_HOSTNAME="laptop-relay"
+export TSNET_DIR="$HOME/.local/state/tsnet-http-relay"
+export TSNET_FUNNEL_ADDR=":443"
+EOF
+
+chmod 600 ~/.config/tsnet-http-relay/env
+```
+
+Generate token:
+
+```sh
+perl -0777 -pi -e 's/replace-me/'"$(openssl rand -base64 32 | sed 's/[\/&]/\\&/g')"'/g' ~/.config/tsnet-http-relay/env
+```
+
+Create wrapper:
+
+```sh
+cat > ~/.local/bin/tsnet-http-relay-systemd <<'EOF'
+#!/bin/sh
+set -eu
+
+. "$HOME/.config/tsnet-http-relay/env"
+
+exec "$HOME/.local/bin/tsnet-http-relay"
+EOF
+
+chmod +x ~/.local/bin/tsnet-http-relay-systemd
+```
+
+Create systemd unit:
+
+```sh
+mkdir -p ~/.config/systemd/user
+
+cat > ~/.config/systemd/user/tsnet-http-relay.service <<'EOF'
+[Unit]
+Description=tsnet HTTP relay
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/tsnet-http-relay-systemd
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
+EOF
+```
+
+Start:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now tsnet-http-relay.service
+```
+
+Run without an active login session:
+
+```sh
+sudo loginctl enable-linger "$USER"
+```
+
+Check:
+
+```sh
+systemctl --user status tsnet-http-relay.service
+journalctl --user -u tsnet-http-relay.service -f
+```
+
+Restart:
+
+```sh
+systemctl --user restart tsnet-http-relay.service
+```
+
+If you changed the unit, reload it:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user restart tsnet-http-relay.service
+```
+
+Stop:
+
+```sh
+systemctl --user disable --now tsnet-http-relay.service
+```
+
+First run can print a Tailscale auth URL. Open it once. Future runs reuse `TSNET_DIR`.
