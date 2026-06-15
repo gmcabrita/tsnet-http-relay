@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Danny-Dasilva/CycleTLS/cycletls"
@@ -336,19 +337,54 @@ func skipResponseHeader(name string) bool {
 }
 
 type CycleTLSClient struct {
+	mu     sync.Mutex
+	closed bool
 	client cycletls.CycleTLS
 }
 
-func NewCycleTLSClient() CycleTLSClient {
-	return CycleTLSClient{client: cycletls.Init(cycletls.WithRawBytes())}
+func NewCycleTLSClient() *CycleTLSClient {
+	return &CycleTLSClient{client: newCycleTLS()}
 }
 
-func (client CycleTLSClient) Close() {
-	client.client.Close()
+func newCycleTLS() cycletls.CycleTLS {
+	return cycletls.Init(cycletls.WithRawBytes())
 }
 
-func (client CycleTLSClient) Do(request OutboundRequest) (OutboundResponse, error) {
-	response, err := client.client.Do(request.URL, cycletls.Options{
+func (client *CycleTLSClient) Close() {
+	client.mu.Lock()
+	if client.closed {
+		client.mu.Unlock()
+		return
+	}
+	cycleTLS := client.client
+	client.closed = true
+	client.client = cycletls.CycleTLS{}
+	client.mu.Unlock()
+
+	cycleTLS.Close()
+}
+
+func (client *CycleTLSClient) Do(request OutboundRequest) (OutboundResponse, error) {
+	response, err := client.do(request)
+	if err == nil {
+		return response, nil
+	}
+	if !retryableMethod(request.Method) || !closedNetworkError(err) {
+		return OutboundResponse{}, err
+	}
+
+	log.Printf("resetting CycleTLS after closed connection: %v", err)
+	client.reset()
+
+	return client.do(request)
+}
+
+func (client *CycleTLSClient) do(request OutboundRequest) (OutboundResponse, error) {
+	client.mu.Lock()
+	cycleTLS := client.client
+	client.mu.Unlock()
+
+	response, err := cycleTLS.Do(request.URL, cycletls.Options{
 		Headers:               request.Headers,
 		BodyBytes:             request.Body,
 		Ja3:                   request.JA3,
@@ -373,6 +409,32 @@ func (client CycleTLSClient) Do(request OutboundRequest) (OutboundResponse, erro
 		Headers:    response.Headers,
 		Body:       response.BodyBytes,
 	}, nil
+}
+
+func (client *CycleTLSClient) reset() {
+	client.mu.Lock()
+	if client.closed {
+		client.mu.Unlock()
+		return
+	}
+	cycleTLS := client.client
+	client.client = newCycleTLS()
+	client.mu.Unlock()
+
+	cycleTLS.Close()
+}
+
+func closedNetworkError(err error) bool {
+	return strings.Contains(err.Error(), "use of closed network connection")
+}
+
+func retryableMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	default:
+		return false
+	}
 }
 
 func timeoutSeconds(timeout time.Duration) int {
