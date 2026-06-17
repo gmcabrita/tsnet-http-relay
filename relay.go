@@ -1,19 +1,22 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/Danny-Dasilva/CycleTLS/cycletls"
+	cloakclient "github.com/sardanioss/httpcloak/client"
 )
 
 const (
@@ -28,10 +31,8 @@ type Config struct {
 	AllowedHosts       HostAllowlist
 	MaxBodyBytes       int64
 	Timeout            time.Duration
+	BrowserPreset      string
 	DefaultUserAgent   string
-	JA3                string
-	JA4R               string
-	HTTP2Fingerprint   string
 	ForceHTTP1         bool
 	ForceHTTP3         bool
 	InsecureSkipVerify bool
@@ -92,9 +93,6 @@ type OutboundRequest struct {
 	Body               []byte
 	Timeout            time.Duration
 	UserAgent          string
-	JA3                string
-	JA4R               string
-	HTTP2Fingerprint   string
 	ForceHTTP1         bool
 	ForceHTTP3         bool
 	InsecureSkipVerify bool
@@ -183,9 +181,6 @@ func (relay Relay) buildOutboundRequest(w http.ResponseWriter, r *http.Request) 
 		Body:               body,
 		Timeout:            relay.config.Timeout,
 		UserAgent:          userAgent,
-		JA3:                relay.config.JA3,
-		JA4R:               relay.config.JA4R,
-		HTTP2Fingerprint:   relay.config.HTTP2Fingerprint,
 		ForceHTTP1:         relay.config.ForceHTTP1,
 		ForceHTTP3:         relay.config.ForceHTTP3,
 		InsecureSkipVerify: relay.config.InsecureSkipVerify,
@@ -336,113 +331,177 @@ func skipResponseHeader(name string) bool {
 	}
 }
 
-type CycleTLSClient struct {
-	mu     sync.Mutex
-	closed bool
-	client cycletls.CycleTLS
+type HTTPCloakClient struct {
+	client     *cloakclient.Client
+	httpClient *http.Client
 }
 
-func NewCycleTLSClient() *CycleTLSClient {
-	return &CycleTLSClient{client: newCycleTLS()}
-}
-
-func newCycleTLS() cycletls.CycleTLS {
-	return cycletls.Init(cycletls.WithRawBytes())
-}
-
-func (client *CycleTLSClient) Close() {
-	client.mu.Lock()
-	if client.closed {
-		client.mu.Unlock()
-		return
+func NewHTTPCloakClient(config Config) *HTTPCloakClient {
+	preset := config.BrowserPreset
+	if preset == "" {
+		preset = defaultBrowserPreset
 	}
-	cycleTLS := client.client
-	client.closed = true
-	client.client = cycletls.CycleTLS{}
-	client.mu.Unlock()
-
-	cycleTLS.Close()
-}
-
-func (client *CycleTLSClient) Do(request OutboundRequest) (OutboundResponse, error) {
-	response, err := client.do(request)
-	if err == nil {
-		return response, nil
-	}
-	if !retryableMethod(request.Method) || !closedNetworkError(err) {
-		return OutboundResponse{}, err
+	timeout := config.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
 	}
 
-	log.Printf("resetting CycleTLS after closed connection: %v", err)
-	client.reset()
+	options := []cloakclient.Option{
+		cloakclient.WithTimeout(timeout),
+	}
+	if config.InsecureSkipVerify {
+		options = append(options, cloakclient.WithInsecureSkipVerify())
+	}
+	var tlsConfig *tls.Config
+	if config.InsecureSkipVerify {
+		tlsConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 
-	return client.do(request)
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		TLSClientConfig:       tlsConfig,
+	}
+
+	return &HTTPCloakClient{
+		client: cloakclient.NewClient(preset, options...),
+		httpClient: &http.Client{
+			Timeout:   timeout,
+			Transport: transport,
+		},
+	}
 }
 
-func (client *CycleTLSClient) do(request OutboundRequest) (OutboundResponse, error) {
-	client.mu.Lock()
-	cycleTLS := client.client
-	client.mu.Unlock()
+func (client *HTTPCloakClient) Close() {
+	client.client.Close()
+}
 
-	response, err := cycleTLS.Do(request.URL, cycletls.Options{
-		Headers:               request.Headers,
-		BodyBytes:             request.Body,
-		Ja3:                   request.JA3,
-		Ja4r:                  request.JA4R,
-		HTTP2Fingerprint:      request.HTTP2Fingerprint,
-		UserAgent:             request.UserAgent,
-		Timeout:               timeoutSeconds(request.Timeout),
-		DisableRedirect:       request.DisableRedirects,
-		InsecureSkipVerify:    request.InsecureSkipVerify,
-		ForceHTTP1:            request.ForceHTTP1,
-		ForceHTTP3:            request.ForceHTTP3,
-		EnableConnectionReuse: true,
-	}, request.Method)
+func (client *HTTPCloakClient) Do(request OutboundRequest) (OutboundResponse, error) {
+	targetURL, err := url.Parse(request.URL)
+	if err != nil {
+		return OutboundResponse{}, fmt.Errorf("parse target url: %w", err)
+	}
+	if targetURL.Scheme == "http" {
+		return client.doHTTP(request)
+	}
+	return client.doHTTPS(request)
+}
+
+func (client *HTTPCloakClient) doHTTPS(request OutboundRequest) (OutboundResponse, error) {
+	response, err := client.client.Do(context.Background(), &cloakclient.Request{
+		Method:          request.Method,
+		URL:             request.URL,
+		Headers:         multiValueHeaders(request.Headers),
+		Body:            bytes.NewReader(request.Body),
+		Timeout:         request.Timeout,
+		UserAgent:       request.UserAgent,
+		ForceProtocol:   forceProtocol(request),
+		FollowRedirects: followRedirects(request),
+	})
 	if err != nil {
 		return OutboundResponse{}, err
 	}
-	if response.Status == 0 {
-		return OutboundResponse{}, errors.New(response.Body)
+	defer func() {
+		if err := response.Close(); err != nil {
+			log.Printf("closing httpcloak response: %v", err)
+		}
+	}()
+
+	body, err := response.Bytes()
+	if err != nil {
+		return OutboundResponse{}, err
 	}
 	return OutboundResponse{
-		StatusCode: response.Status,
-		Headers:    response.Headers,
-		Body:       response.BodyBytes,
+		StatusCode: response.StatusCode,
+		Headers:    singleValueHeaders(response.Headers),
+		Body:       body,
 	}, nil
 }
 
-func (client *CycleTLSClient) reset() {
-	client.mu.Lock()
-	if client.closed {
-		client.mu.Unlock()
-		return
-	}
-	cycleTLS := client.client
-	client.client = newCycleTLS()
-	client.mu.Unlock()
+func (client *HTTPCloakClient) doHTTP(request OutboundRequest) (OutboundResponse, error) {
+	ctx, cancel := contextForTimeout(request.Timeout)
+	defer cancel()
 
-	cycleTLS.Close()
+	httpRequest, err := http.NewRequestWithContext(ctx, request.Method, request.URL, bytes.NewReader(request.Body))
+	if err != nil {
+		return OutboundResponse{}, err
+	}
+	for name, value := range request.Headers {
+		httpRequest.Header.Set(name, value)
+	}
+
+	httpClient := *client.httpClient
+	if request.DisableRedirects {
+		httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+
+	response, err := httpClient.Do(httpRequest)
+	if err != nil {
+		return OutboundResponse{}, err
+	}
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			log.Printf("closing http response body: %v", err)
+		}
+	}()
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return OutboundResponse{}, err
+	}
+	return OutboundResponse{
+		StatusCode: response.StatusCode,
+		Headers:    singleValueHeaders(response.Header),
+		Body:       body,
+	}, nil
 }
 
-func closedNetworkError(err error) bool {
-	return strings.Contains(err.Error(), "use of closed network connection")
+func multiValueHeaders(headers map[string]string) map[string][]string {
+	out := make(map[string][]string, len(headers))
+	for name, value := range headers {
+		out[name] = []string{value}
+	}
+	return out
 }
 
-func retryableMethod(method string) bool {
-	switch method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions:
-		return true
-	default:
-		return false
+func singleValueHeaders(headers map[string][]string) map[string]string {
+	out := make(map[string]string, len(headers))
+	for name, values := range headers {
+		if len(values) == 0 {
+			continue
+		}
+		out[name] = values[0]
 	}
+	return out
 }
 
-func timeoutSeconds(timeout time.Duration) int {
-	seconds := int(timeout.Round(time.Second) / time.Second)
-	if seconds < 1 {
-		return 1
+func forceProtocol(request OutboundRequest) cloakclient.Protocol {
+	if request.ForceHTTP1 {
+		return cloakclient.ProtocolHTTP1
 	}
-	return seconds
+	if request.ForceHTTP3 {
+		return cloakclient.ProtocolHTTP3
+	}
+	return cloakclient.ProtocolAuto
+}
+
+func followRedirects(request OutboundRequest) *bool {
+	follow := !request.DisableRedirects
+	return &follow
+}
+
+func contextForTimeout(timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return context.WithCancel(context.Background())
+	}
+	return context.WithTimeout(context.Background(), timeout)
 }
 
 func parseBool(raw string) (bool, error) {

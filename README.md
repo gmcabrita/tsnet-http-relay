@@ -3,7 +3,7 @@
 Single Go binary HTTP relay:
 
 ```text
-Cloudflare Worker -> tsnet Funnel HTTPS -> this binary -> CycleTLS outbound request
+Cloudflare Worker -> tsnet Funnel HTTPS -> this binary -> httpcloak outbound request
 ```
 
 ## Tailscale setup
@@ -49,15 +49,16 @@ Defaults:
 
 `RELAY_ALLOWED_HOSTS="*"` allows arbitrary HTTP(S) target hosts. Use `RELAY_ALLOWED_HOSTS="ifconfig.me,example.com"` to restrict to exact hosts.
 
-Optional CycleTLS knobs:
+Optional httpcloak knobs:
 
+- `RELAY_BROWSER_PRESET=chrome-latest`
 - `RELAY_USER_AGENT`
-- `RELAY_JA3`
-- `RELAY_JA4R`
-- `RELAY_HTTP2_FINGERPRINT`
 - `RELAY_FORCE_HTTP1=true`
 - `RELAY_FORCE_HTTP3=true`
 - `RELAY_DISABLE_REDIRECTS=true`
+
+`RELAY_BROWSER_PRESET` selects the httpcloak browser fingerprint. Defaults to `chrome-latest`.
+`RELAY_USER_AGENT` defaults to the selected preset's user agent.
 
 Redirects are followed by default. Set `RELAY_DISABLE_REDIRECTS=true` to stop following them.
 

@@ -162,7 +162,7 @@ func TestRelayForwardsAllowedRequest(t *testing.T) {
 		t.Fatalf("user-agent header = %q", client.request.Headers["User-Agent"])
 	}
 	if client.request.UserAgent != "worker-agent" {
-		t.Fatalf("cycletls user-agent = %q", client.request.UserAgent)
+		t.Fatalf("httpcloak user-agent = %q", client.request.UserAgent)
 	}
 	if client.request.Headers["X-Custom"] != "custom" {
 		t.Fatalf("x-custom = %q", client.request.Headers["X-Custom"])
@@ -321,7 +321,7 @@ func TestRelayUsesDefaultUserAgent(t *testing.T) {
 	relay.ServeHTTP(response, request)
 
 	if client.request.UserAgent != "test-agent" {
-		t.Fatalf("cycletls user-agent = %q", client.request.UserAgent)
+		t.Fatalf("httpcloak user-agent = %q", client.request.UserAgent)
 	}
 	if client.request.Headers["User-Agent"] != "test-agent" {
 		t.Fatalf("user-agent header = %q", client.request.Headers["User-Agent"])

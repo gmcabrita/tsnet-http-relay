@@ -8,10 +8,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sardanioss/httpcloak/fingerprint"
 	"tailscale.com/tsnet"
 )
 
-const defaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+const defaultBrowserPreset = "chrome-latest"
 
 func main() {
 	config, err := loadConfigFromEnv()
@@ -19,8 +20,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	cycleTLS := NewCycleTLSClient()
-	defer cycleTLS.Close()
+	httpCloak := NewHTTPCloakClient(config)
+	defer httpCloak.Close()
 
 	tsServer := &tsnet.Server{
 		Hostname: envOrDefault("TSNET_HOSTNAME", "laptop-relay"),
@@ -39,7 +40,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	handler := NewRelay(config, cycleTLS)
+	handler := NewRelay(config, httpCloak)
 	server := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -70,6 +71,16 @@ func loadConfigFromEnv() (Config, error) {
 		return Config{}, err
 	}
 
+	browserPreset := envOrDefault("RELAY_BROWSER_PRESET", defaultBrowserPreset)
+	preset := fingerprint.GetStrict(browserPreset)
+	if preset == nil {
+		return Config{}, fmt.Errorf("RELAY_BROWSER_PRESET unknown: %s", browserPreset)
+	}
+	defaultUserAgent := os.Getenv("RELAY_USER_AGENT")
+	if defaultUserAgent == "" {
+		defaultUserAgent = preset.UserAgent
+	}
+
 	forceHTTP1, err := parseBool(os.Getenv("RELAY_FORCE_HTTP1"))
 	if err != nil {
 		return Config{}, err
@@ -78,6 +89,9 @@ func loadConfigFromEnv() (Config, error) {
 	forceHTTP3, err := parseBool(os.Getenv("RELAY_FORCE_HTTP3"))
 	if err != nil {
 		return Config{}, err
+	}
+	if forceHTTP1 && forceHTTP3 {
+		return Config{}, fmt.Errorf("RELAY_FORCE_HTTP1 and RELAY_FORCE_HTTP3 are mutually exclusive")
 	}
 
 	insecureSkipVerify, err := parseBool(os.Getenv("RELAY_INSECURE_SKIP_VERIFY"))
@@ -95,10 +109,8 @@ func loadConfigFromEnv() (Config, error) {
 		AllowedHosts:       allowedHosts,
 		MaxBodyBytes:       maxBodyBytes,
 		Timeout:            timeout,
-		DefaultUserAgent:   envOrDefault("RELAY_USER_AGENT", defaultUserAgent),
-		JA3:                os.Getenv("RELAY_JA3"),
-		JA4R:               os.Getenv("RELAY_JA4R"),
-		HTTP2Fingerprint:   os.Getenv("RELAY_HTTP2_FINGERPRINT"),
+		BrowserPreset:      browserPreset,
+		DefaultUserAgent:   defaultUserAgent,
 		ForceHTTP1:         forceHTTP1,
 		ForceHTTP3:         forceHTTP3,
 		InsecureSkipVerify: insecureSkipVerify,
