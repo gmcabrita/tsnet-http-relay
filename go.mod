@@ -1,6 +1,6 @@
 module tsnet-http-relay
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/sardanioss/httpcloak v1.6.8

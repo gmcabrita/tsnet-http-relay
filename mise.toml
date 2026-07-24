@@ -1,5 +1,4 @@
 [tools]
-go = "1.26.5"
 
 [tasks.update]
 description = "Update direct dependencies"
