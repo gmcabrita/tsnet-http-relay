@@ -3,6 +3,14 @@
   "extends": ["config:best-practices"],
   "reviewers": ["gmcabrita"],
   "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "matchDepTypes": ["golang"],
+      "rangeStrategy": "bump"
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
