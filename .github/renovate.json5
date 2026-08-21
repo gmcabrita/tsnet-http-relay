@@ -1,0 +1,18 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices"],
+  "postUpdateOptions": ["gomodTidy"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Update Go tools used by mise tasks",
+      "managerFilePatterns": ["/^mise\\.toml$/"],
+      "matchStrings": [
+        "go run (?<depName>(?:golang\\.org/x/(?:tools|vuln)|honnef\\.co/go/tools|github\\.com/kisielk/errcheck|mvdan\\.cc/gofumpt))(?:/cmd/[a-z0-9-]+)?@(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "go",
+      "versioningTemplate": "semver",
+      "depTypeTemplate": "go-tool"
+    }
+  ]
+}
