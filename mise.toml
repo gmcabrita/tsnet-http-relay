@@ -22,7 +22,7 @@ run = [
   "test -z \"$(find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go run mvdan.cc/gofumpt@v0.11.0 -l)\"",
   "go vet ./...",
   "go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...",
-  "go run honnef.co/go/tools/cmd/staticcheck@v0.8.0 ./...",
+  "go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...",
   "go run github.com/kisielk/errcheck@v1.20.0 ./...",
 ]
 
