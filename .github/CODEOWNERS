@@ -1,0 +1,6 @@
+# Dependency manifests and automation
+/go.mod @gmcabrita
+/go.sum @gmcabrita
+/mise.toml @gmcabrita
+/.github/dependabot.yml @gmcabrita
+/.github/workflows/** @gmcabrita

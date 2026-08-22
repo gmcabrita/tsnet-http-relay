@@ -11,24 +11,24 @@ run = [
 [tasks.fmt]
 description = "Format Go files"
 run = [
-  "find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go run golang.org/x/tools/cmd/goimports@v0.49.0 -w",
-  "find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go run mvdan.cc/gofumpt@v0.11.0 -w",
+  "find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go tool goimports -w",
+  "find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go tool gofumpt -w",
 ]
 
 [tasks.lint]
 description = "Run Go linters"
 run = [
-  "test -z \"$(find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go run golang.org/x/tools/cmd/goimports@v0.49.0 -l)\"",
-  "test -z \"$(find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go run mvdan.cc/gofumpt@v0.11.0 -l)\"",
+  "test -z \"$(find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go tool goimports -l)\"",
+  "test -z \"$(find . -name '*.go' -not -path './tsnet-state/*' -print0 | xargs -0 go tool gofumpt -l)\"",
   "go vet ./...",
-  "go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...",
-  "go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...",
-  "go run github.com/kisielk/errcheck@v1.20.0 ./...",
+  "go tool govulncheck ./...",
+  "go tool staticcheck ./...",
+  "go tool errcheck ./...",
 ]
 
 [tasks.test]
-description = "Run tests"
-run = "go test ./..."
+description = "Run tests with race detector"
+run = "go test -race ./..."
 
 [tasks.build]
 description = "Build binary"
@@ -43,10 +43,8 @@ description = "Remove build outputs"
 run = "rm -f tsnet-http-relay"
 
 [tasks.check]
-description = "Format, lint, test, build"
+description = "Lint and test"
 run = [
-  "mise run fmt",
   "mise run lint",
   "mise run test",
-  "mise run build",
 ]
