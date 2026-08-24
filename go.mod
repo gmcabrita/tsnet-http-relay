@@ -2,6 +2,8 @@ module tsnet-http-relay
 
 go 1.27.0
 
+toolchain go1.27.0
+
 require (
 	github.com/sardanioss/httpcloak v1.6.11
 	tailscale.com v1.102.3
