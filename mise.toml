@@ -4,7 +4,7 @@
 [tasks.update]
 description = "Update direct dependencies"
 run = [
-  "skills add JetBrains/go-modern-guidelines --skill use-modern-go --agent universal --yes",
+  "skills update --project --yes",
   "go get $(go list -m -f {% raw %}'{{if and (not .Main) (not .Indirect)}}{{.Path}}@latest{{end}}'{% endraw %} all)",
   "go mod tidy",
   "mise run check",
