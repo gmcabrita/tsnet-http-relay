@@ -1,0 +1,2 @@
+- Use `gopls` for finding APIs or callers
+- Use `godoc` for browsing documentation
