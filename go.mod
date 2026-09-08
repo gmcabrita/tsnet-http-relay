@@ -5,7 +5,7 @@ go 1.27
 toolchain go1.27.0
 
 require (
-	github.com/sardanioss/httpcloak v1.6.11
+	github.com/sardanioss/httpcloak v1.7.2
 	tailscale.com v1.102.3
 )
 
@@ -37,11 +37,11 @@ require (
 	github.com/pires/go-proxyproto v0.15.0 // indirect
 	github.com/safchain/ethtool v0.7.0 // indirect
 	github.com/sardanioss/http v1.2.0 // indirect
-	github.com/sardanioss/net v1.2.7 // indirect
+	github.com/sardanioss/net v1.2.10 // indirect
 	github.com/sardanioss/qpack v0.6.3 // indirect
-	github.com/sardanioss/quic-go v1.2.27 // indirect
+	github.com/sardanioss/quic-go v1.2.29 // indirect
 	github.com/sardanioss/udpbara v1.1.0 // indirect
-	github.com/sardanioss/utls v1.10.3 // indirect
+	github.com/sardanioss/utls v1.10.5 // indirect
 	github.com/tailscale/certstore v0.1.1-0.20260409135935-3638fb84b77d // indirect
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect
 	github.com/tailscale/hujson v0.0.0-20260718110524-10d7940d4c87 // indirect
