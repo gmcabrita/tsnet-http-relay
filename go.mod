@@ -6,7 +6,7 @@ toolchain go1.27.0
 
 require (
 	github.com/sardanioss/httpcloak v1.7.2
-	tailscale.com v1.102.3
+	tailscale.com v1.102.4
 )
 
 require (
