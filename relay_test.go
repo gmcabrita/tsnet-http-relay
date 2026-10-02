@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -451,5 +452,163 @@ func TestRelayRejectsConnect(t *testing.T) {
 	}
 	if client.request.URL != "" {
 		t.Fatal("client should not be called")
+	}
+}
+
+func TestRelayUsesBrowserClientByDefault(t *testing.T) {
+	client := &recordingClient{response: OutboundResponse{StatusCode: http.StatusOK}}
+	relay := NewRelay(testConfig(t), client)
+
+	request := httptest.NewRequest(http.MethodGet, "/https://example.com/", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	relay.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if client.request.Client != OutboundClientBrowser {
+		t.Fatalf("client = %v", client.request.Client)
+	}
+}
+
+func TestRelaySelectsPlainClientAndStripsHeader(t *testing.T) {
+	client := &recordingClient{response: OutboundResponse{StatusCode: http.StatusOK}}
+	relay := NewRelay(testConfig(t), client)
+
+	request := httptest.NewRequest(http.MethodGet, "/https://example.com/", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("X-Relay-Client", "plain")
+	response := httptest.NewRecorder()
+	relay.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if client.request.Client != OutboundClientPlain {
+		t.Fatalf("client = %v", client.request.Client)
+	}
+	if _, ok := client.request.Headers["X-Relay-Client"]; ok {
+		t.Fatal("expected X-Relay-Client stripped")
+	}
+}
+
+func TestRelayRejectsUnknownClient(t *testing.T) {
+	client := &recordingClient{}
+	relay := NewRelay(testConfig(t), client)
+
+	request := httptest.NewRequest(http.MethodGet, "/https://example.com/", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("X-Relay-Client", "firefox")
+	response := httptest.NewRecorder()
+	relay.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if client.request.URL != "" {
+		t.Fatal("client should not be called")
+	}
+}
+
+func TestHTTPCloakClientPlainHTTPSSendsOnlyCallerHeaders(t *testing.T) {
+	var received http.Header
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.Header.Clone()
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	client := NewHTTPCloakClient(Config{InsecureSkipVerify: true, Timeout: 5 * time.Second})
+	defer client.Close()
+
+	response, err := client.Do(OutboundRequest{
+		Client:  OutboundClientPlain,
+		URL:     server.URL,
+		Method:  http.MethodGet,
+		Headers: map[string]string{"User-Agent": "WhatsApp/2.23.20.0", "Accept": "*/*"},
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || string(response.Body) != "ok" {
+		t.Fatalf("response = %d %q", response.StatusCode, response.Body)
+	}
+	if received.Get("User-Agent") != "WhatsApp/2.23.20.0" {
+		t.Fatalf("user-agent = %q", received.Get("User-Agent"))
+	}
+	for _, name := range []string{"Sec-Ch-Ua", "Sec-Fetch-Mode", "Origin", "Priority"} {
+		if value := received.Get(name); value != "" {
+			t.Fatalf("unexpected browser header %s = %q", name, value)
+		}
+	}
+}
+
+func TestRelayRejectsRepeatedClientHeader(t *testing.T) {
+	client := &recordingClient{}
+	relay := NewRelay(testConfig(t), client)
+
+	request := httptest.NewRequest(http.MethodGet, "/https://example.com/", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Add("X-Relay-Client", "plain")
+	request.Header.Add("X-Relay-Client", "firefox")
+	response := httptest.NewRecorder()
+	relay.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if client.request.URL != "" {
+		t.Fatal("client should not be called")
+	}
+}
+
+func TestRelayPlainClientSkipsDefaultUserAgent(t *testing.T) {
+	client := &recordingClient{response: OutboundResponse{StatusCode: http.StatusOK}}
+	relay := NewRelay(testConfig(t), client)
+
+	request := httptest.NewRequest(http.MethodGet, "/https://example.com/", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("X-Relay-Client", "plain")
+	response := httptest.NewRecorder()
+	relay.ServeHTTP(response, request)
+
+	if client.request.UserAgent != "" {
+		t.Fatalf("user-agent = %q", client.request.UserAgent)
+	}
+	if _, ok := client.request.Headers["User-Agent"]; ok {
+		t.Fatal("expected no User-Agent header")
+	}
+}
+
+func TestHTTPCloakClientPlainHTTPSDecompressesWithCallerAcceptEncoding(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			_, _ = w.Write([]byte("uncompressed"))
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		writer := gzip.NewWriter(w)
+		_, _ = writer.Write([]byte("decompressed"))
+		_ = writer.Close()
+	}))
+	defer server.Close()
+
+	client := NewHTTPCloakClient(Config{InsecureSkipVerify: true, Timeout: 5 * time.Second})
+	defer client.Close()
+
+	response, err := client.Do(OutboundRequest{
+		Client:  OutboundClientPlain,
+		URL:     server.URL,
+		Method:  http.MethodGet,
+		Headers: map[string]string{"Accept-Encoding": "gzip, br"},
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(response.Body) != "decompressed" {
+		t.Fatalf("body = %q", response.Body)
 	}
 }

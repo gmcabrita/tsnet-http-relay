@@ -71,6 +71,15 @@ curl "https://laptop-relay.your-tailnet.ts.net/https://ifconfig.me" \
   -H "Authorization: Bearer $RELAY_TOKEN"
 ```
 
+Send `X-Relay-Client: plain` to send an HTTPS request through Go `net/http` with no browser fingerprint or added browser headers. Use it with a non-browser `User-Agent`, because some bot filters block a browser fingerprint with a non-browser `User-Agent`. The relay removes this header before it forwards the request. The default is `browser` (httpcloak).
+
+```sh
+curl "https://laptop-relay.your-tailnet.ts.net/https://example.com/api" \
+  -H "Authorization: Bearer $RELAY_TOKEN" \
+  -H "X-Relay-Client: plain" \
+  -H "User-Agent: WhatsApp/2.23.20.0"
+```
+
 Use the inbound method as the outbound method:
 
 ```sh

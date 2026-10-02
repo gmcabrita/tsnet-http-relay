@@ -26,6 +26,35 @@ const (
 
 var errUnauthorized = errors.New("unauthorized")
 
+// relayClientHeader selects the outbound client for one request. The relay
+// removes it before it forwards the request.
+const relayClientHeader = "X-Relay-Client"
+
+// OutboundClientKind selects how the relay sends an HTTPS request.
+type OutboundClientKind int
+
+const (
+	// OutboundClientBrowser sends the request through httpcloak with the browser
+	// preset TLS fingerprint and browser headers. This is the default.
+	OutboundClientBrowser OutboundClientKind = iota
+	// OutboundClientPlain sends the request through Go net/http without browser
+	// fingerprint or added headers. Use it when the caller sends a non-browser
+	// User-Agent: some bot filters block a browser fingerprint with a
+	// non-browser User-Agent.
+	OutboundClientPlain
+)
+
+func parseOutboundClientKind(value string) (OutboundClientKind, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "browser":
+		return OutboundClientBrowser, true
+	case "plain":
+		return OutboundClientPlain, true
+	default:
+		return OutboundClientBrowser, false
+	}
+}
+
 type Config struct {
 	RelayToken         string
 	AllowedHosts       HostAllowlist
@@ -87,6 +116,7 @@ type OutboundClient interface {
 }
 
 type OutboundRequest struct {
+	Client             OutboundClientKind
 	URL                string
 	Method             string
 	Headers            map[string]string
@@ -155,6 +185,11 @@ func (relay Relay) buildOutboundRequest(w http.ResponseWriter, r *http.Request) 
 	if !relay.config.AllowedHosts.Allows(targetURL.Hostname()) {
 		return OutboundRequest{}, relayHTTPError{status: http.StatusForbidden, message: "host not allowed"}
 	}
+	clientValues := r.Header.Values(relayClientHeader)
+	clientKind, ok := parseOutboundClientKind(r.Header.Get(relayClientHeader))
+	if !ok || len(clientValues) > 1 {
+		return OutboundRequest{}, relayHTTPError{status: http.StatusBadRequest, message: "unknown " + relayClientHeader}
+	}
 	targetMethod := targetMethodValue(r)
 	if !allowedMethod(targetMethod) {
 		return OutboundRequest{}, relayHTTPError{status: http.StatusMethodNotAllowed, message: "method not allowed"}
@@ -167,7 +202,9 @@ func (relay Relay) buildOutboundRequest(w http.ResponseWriter, r *http.Request) 
 
 	headers := targetHeaders(r.Header)
 	userAgent := headers["User-Agent"]
-	if userAgent == "" {
+	// The default User-Agent is the browser preset one. A plain request must not
+	// look like a browser, so it only sends the caller's User-Agent.
+	if userAgent == "" && clientKind == OutboundClientBrowser {
 		userAgent = relay.config.DefaultUserAgent
 	}
 	if userAgent != "" {
@@ -175,6 +212,7 @@ func (relay Relay) buildOutboundRequest(w http.ResponseWriter, r *http.Request) 
 	}
 
 	return OutboundRequest{
+		Client:             clientKind,
 		URL:                targetURL.String(),
 		Method:             targetMethod,
 		Headers:            headers,
@@ -293,6 +331,7 @@ func skipRequestHeader(name string) bool {
 		"trailer",
 		"transfer-encoding",
 		"upgrade",
+		"x-relay-client",
 		"x-target-url",
 		"x-forwarded-for",
 		"x-forwarded-host",
@@ -386,13 +425,14 @@ func (client *HTTPCloakClient) Do(request OutboundRequest) (OutboundResponse, er
 	if err != nil {
 		return OutboundResponse{}, fmt.Errorf("parse target url: %w", err)
 	}
-	if targetURL.Scheme == "http" {
-		return client.doHTTP(request)
+	if targetURL.Scheme == "http" || request.Client == OutboundClientPlain {
+		return client.doPlain(request)
 	}
-	return client.doHTTPS(request)
+	return client.doBrowser(request)
 }
 
-func (client *HTTPCloakClient) doHTTPS(request OutboundRequest) (OutboundResponse, error) {
+// doBrowser sends the request through httpcloak with the browser fingerprint.
+func (client *HTTPCloakClient) doBrowser(request OutboundRequest) (OutboundResponse, error) {
 	response, err := client.client.Do(context.Background(), &cloakclient.Request{
 		Method:          request.Method,
 		URL:             request.URL,
@@ -423,7 +463,9 @@ func (client *HTTPCloakClient) doHTTPS(request OutboundRequest) (OutboundRespons
 	}, nil
 }
 
-func (client *HTTPCloakClient) doHTTP(request OutboundRequest) (OutboundResponse, error) {
+// doPlain sends the request through Go net/http. httpcloak does not support
+// plain HTTP, and plain HTTPS requests must not get a browser fingerprint.
+func (client *HTTPCloakClient) doPlain(request OutboundRequest) (OutboundResponse, error) {
 	ctx, cancel := contextForTimeout(request.Timeout)
 	defer cancel()
 
@@ -434,6 +476,9 @@ func (client *HTTPCloakClient) doHTTP(request OutboundRequest) (OutboundResponse
 	for name, value := range request.Headers {
 		httpRequest.Header.Set(name, value)
 	}
+	// Let Go set Accept-Encoding and decompress the body. With a caller value,
+	// Go returns the compressed body, and the relay drops Content-Encoding.
+	httpRequest.Header.Del("Accept-Encoding")
 
 	httpClient := *client.httpClient
 	if request.DisableRedirects {
