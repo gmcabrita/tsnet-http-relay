@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/sardanioss/httpcloak v1.7.3
-	tailscale.com v1.104.1
+	tailscale.com v1.104.2
 )
 
 require (
@@ -67,7 +67,7 @@ require (
 	golang.zx2c4.com/wireguard/windows v1.0.1 // indirect
 	gvisor.dev/gvisor v0.0.0-20260915211658-a6f909f08a72 // indirect
 	honnef.co/go/tools v0.8.1 // indirect
-	mvdan.cc/gofumpt v0.11.0 // indirect
+	mvdan.cc/gofumpt v0.12.0 // indirect
 )
 
 tool (
