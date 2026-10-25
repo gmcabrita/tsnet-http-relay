@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -158,6 +159,11 @@ func (relay Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response, err := relay.client.Do(outbound)
+	if errors.Is(err, errTargetNotPublic) {
+		log.Printf("relay request blocked: %v", err)
+		http.Error(w, errTargetNotPublic.Error(), http.StatusForbidden)
+		return
+	}
 	if err != nil {
 		log.Printf("relay request failed: %v", err)
 		http.Error(w, "bad gateway", http.StatusBadGateway)
@@ -373,9 +379,18 @@ func skipResponseHeader(name string) bool {
 type HTTPCloakClient struct {
 	client     *cloakclient.Client
 	httpClient *http.Client
+	// addrAllowed decides which addresses the client may connect to. See
+	// target_guard.go.
+	addrAllowed func(netip.Addr) bool
+	lookupNetIP lookupNetIPFunc
 }
 
+// NewHTTPCloakClient returns a client that connects to public addresses only.
 func NewHTTPCloakClient(config Config) *HTTPCloakClient {
+	return newHTTPCloakClient(config, publicAddr)
+}
+
+func newHTTPCloakClient(config Config, addrAllowed func(netip.Addr) bool) *HTTPCloakClient {
 	preset := config.BrowserPreset
 	if preset == "" {
 		preset = defaultBrowserPreset
@@ -397,8 +412,12 @@ func NewHTTPCloakClient(config Config) *HTTPCloakClient {
 	}
 
 	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+			Control:   dialControl(addrAllowed),
+		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
@@ -413,6 +432,8 @@ func NewHTTPCloakClient(config Config) *HTTPCloakClient {
 			Timeout:   timeout,
 			Transport: transport,
 		},
+		addrAllowed: addrAllowed,
+		lookupNetIP: net.DefaultResolver.LookupNetIP,
 	}
 }
 
@@ -432,7 +453,30 @@ func (client *HTTPCloakClient) Do(request OutboundRequest) (OutboundResponse, er
 }
 
 // doBrowser sends the request through httpcloak with the browser fingerprint.
+//
+// httpcloak does its own DNS lookups and has no dial hook, so this checks the
+// target and each redirect hop before httpcloak connects. A DNS record that
+// changes between this check and httpcloak's lookup is not caught here; the
+// plain client checks at connect time and has no such gap.
 func (client *HTTPCloakClient) doBrowser(request OutboundRequest) (OutboundResponse, error) {
+	ctx, cancel := contextForTimeout(request.Timeout)
+	defer cancel()
+
+	targetURL, err := url.Parse(request.URL)
+	if err != nil {
+		return OutboundResponse{}, fmt.Errorf("parse target url: %w", err)
+	}
+	if err := checkTargetHost(ctx, targetURL.Hostname(), client.lookupNetIP, client.addrAllowed); err != nil {
+		return OutboundResponse{}, err
+	}
+	checkRedirect := func(hop *cloakclient.Redirect) error {
+		hopURL, err := hop.ToURL()
+		if err != nil {
+			return fmt.Errorf("parse redirect url: %w", err)
+		}
+		return checkTargetHost(ctx, hopURL.Hostname(), client.lookupNetIP, client.addrAllowed)
+	}
+
 	response, err := client.client.Do(context.Background(), &cloakclient.Request{
 		Method:          request.Method,
 		URL:             request.URL,
@@ -442,6 +486,7 @@ func (client *HTTPCloakClient) doBrowser(request OutboundRequest) (OutboundRespo
 		UserAgent:       request.UserAgent,
 		ForceProtocol:   forceProtocol(request),
 		FollowRedirects: followRedirects(request),
+		OnRedirect:      checkRedirect,
 	})
 	if err != nil {
 		return OutboundResponse{}, err
