@@ -379,6 +379,9 @@ func skipResponseHeader(name string) bool {
 type HTTPCloakClient struct {
 	client     *cloakclient.Client
 	httpClient *http.Client
+	// gate is the SOCKS5 proxy that every httpcloak connection goes through.
+	// See dial_gate.go.
+	gate *dialGate
 	// addrAllowed decides which addresses the client may connect to. See
 	// target_guard.go.
 	addrAllowed func(netip.Addr) bool
@@ -386,11 +389,16 @@ type HTTPCloakClient struct {
 }
 
 // NewHTTPCloakClient returns a client that connects to public addresses only.
-func NewHTTPCloakClient(config Config) *HTTPCloakClient {
+func NewHTTPCloakClient(config Config) (*HTTPCloakClient, error) {
 	return newHTTPCloakClient(config, publicAddr)
 }
 
-func newHTTPCloakClient(config Config, addrAllowed func(netip.Addr) bool) *HTTPCloakClient {
+func newHTTPCloakClient(config Config, addrAllowed func(netip.Addr) bool) (*HTTPCloakClient, error) {
+	gate, err := startDialGate(addrAllowed)
+	if err != nil {
+		return nil, err
+	}
+
 	preset := config.BrowserPreset
 	if preset == "" {
 		preset = defaultBrowserPreset
@@ -402,6 +410,7 @@ func newHTTPCloakClient(config Config, addrAllowed func(netip.Addr) bool) *HTTPC
 
 	options := []cloakclient.Option{
 		cloakclient.WithTimeout(timeout),
+		cloakclient.WithProxy(gate.proxyURL),
 	}
 	if config.InsecureSkipVerify {
 		options = append(options, cloakclient.WithInsecureSkipVerify())
@@ -412,12 +421,8 @@ func newHTTPCloakClient(config Config, addrAllowed func(netip.Addr) bool) *HTTPC
 	}
 
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-			Control:   dialControl(addrAllowed),
-		}).DialContext,
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           guardedDialer(addrAllowed).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
@@ -432,13 +437,17 @@ func newHTTPCloakClient(config Config, addrAllowed func(netip.Addr) bool) *HTTPC
 			Timeout:   timeout,
 			Transport: transport,
 		},
+		gate:        gate,
 		addrAllowed: addrAllowed,
 		lookupNetIP: net.DefaultResolver.LookupNetIP,
-	}
+	}, nil
 }
 
 func (client *HTTPCloakClient) Close() {
 	client.client.Close()
+	if err := client.gate.Close(); err != nil {
+		log.Printf("closing dial gate: %v", err)
+	}
 }
 
 func (client *HTTPCloakClient) Do(request OutboundRequest) (OutboundResponse, error) {
@@ -454,10 +463,11 @@ func (client *HTTPCloakClient) Do(request OutboundRequest) (OutboundResponse, er
 
 // doBrowser sends the request through httpcloak with the browser fingerprint.
 //
-// httpcloak does its own DNS lookups and has no dial hook, so this checks the
-// target and each redirect hop before httpcloak connects. A DNS record that
-// changes between this check and httpcloak's lookup is not caught here; the
-// plain client checks at connect time and has no such gap.
+// Every httpcloak connection goes through the dial gate, which checks the
+// address at connect time. This function also checks the target and each
+// redirect hop first, so a blocked target gets a clear 403. A target that
+// passes this check and then resolves to a blocked address is refused by
+// the gate, and the relay answers 502.
 func (client *HTTPCloakClient) doBrowser(request OutboundRequest) (OutboundResponse, error) {
 	ctx, cancel := contextForTimeout(request.Timeout)
 	defer cancel()

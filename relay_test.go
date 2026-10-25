@@ -519,7 +519,7 @@ func TestHTTPCloakClientPlainHTTPSSendsOnlyCallerHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newHTTPCloakClient(Config{InsecureSkipVerify: true, Timeout: 5 * time.Second}, allowAnyAddr)
+	client := mustHTTPCloakClient(t, Config{InsecureSkipVerify: true, Timeout: 5 * time.Second}, allowAnyAddr)
 	defer client.Close()
 
 	response, err := client.Do(OutboundRequest{
@@ -595,7 +595,7 @@ func TestHTTPCloakClientPlainHTTPSDecompressesWithCallerAcceptEncoding(t *testin
 	}))
 	defer server.Close()
 
-	client := newHTTPCloakClient(Config{InsecureSkipVerify: true, Timeout: 5 * time.Second}, allowAnyAddr)
+	client := mustHTTPCloakClient(t, Config{InsecureSkipVerify: true, Timeout: 5 * time.Second}, allowAnyAddr)
 	defer client.Close()
 
 	response, err := client.Do(OutboundRequest{

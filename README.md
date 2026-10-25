@@ -49,7 +49,7 @@ Defaults:
 
 `RELAY_ALLOWED_HOSTS="*"` allows arbitrary HTTP(S) target hosts. Use `RELAY_ALLOWED_HOSTS="ifconfig.me,example.com"` to restrict to exact hosts.
 
-The relay connects to public internet addresses only. It answers `403 target address not allowed` when a target, or a redirect hop, is or resolves to a loopback, private, link-local, carrier-grade NAT (this includes Tailscale `100.x` and `fd7a:` addresses), multicast, or reserved address. See `target_guard.go`.
+The relay connects to public internet addresses only. It answers `403 target address not allowed` when a target, or a redirect hop, is or resolves to a loopback, private, link-local, carrier-grade NAT (this includes Tailscale `100.x` and `fd7a:` addresses), multicast, or reserved address. The check runs when each connection opens, after DNS resolution, so a DNS record that changes after the first check (DNS rebinding) is also refused. The browser client reaches the internet through a SOCKS5 proxy inside the relay process for this reason. See `target_guard.go` and `dial_gate.go`.
 
 Optional httpcloak knobs:
 

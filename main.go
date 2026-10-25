@@ -20,7 +20,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	httpCloak := NewHTTPCloakClient(config)
+	httpCloak, err := NewHTTPCloakClient(config)
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer httpCloak.Close()
 
 	tsServer := &tsnet.Server{

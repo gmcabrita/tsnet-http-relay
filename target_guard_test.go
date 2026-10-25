@@ -22,6 +22,15 @@ func allowOnlyAddr(allowed netip.Addr) func(netip.Addr) bool {
 	return func(addr netip.Addr) bool { return addr.Unmap() == allowed }
 }
 
+func mustHTTPCloakClient(t *testing.T, config Config, addrAllowed func(netip.Addr) bool) *HTTPCloakClient {
+	t.Helper()
+	client, err := newHTTPCloakClient(config, addrAllowed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
 func serverAddr(t *testing.T, server *httptest.Server) netip.Addr {
 	t.Helper()
 	serverURL, err := url.Parse(server.URL)
@@ -99,7 +108,7 @@ func TestHTTPCloakClientBlocksLoopbackTarget(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPCloakClient(Config{InsecureSkipVerify: true, Timeout: 5 * time.Second})
+	client := mustHTTPCloakClient(t, Config{InsecureSkipVerify: true, Timeout: 5 * time.Second}, publicAddr)
 	defer client.Close()
 
 	for _, kind := range []OutboundClientKind{OutboundClientBrowser, OutboundClientPlain} {
@@ -118,27 +127,28 @@ func TestHTTPCloakClientBlocksLoopbackTarget(t *testing.T) {
 	}
 }
 
+// Tests that reach an httptest server set ForceHTTP1: in automatic mode the
+// browser client stalls against httptest servers. Real sites are unaffected.
+
 func TestHTTPCloakClientBlocksRedirectToBlockedAddr(t *testing.T) {
 	for _, kind := range []OutboundClientKind{OutboundClientBrowser, OutboundClientPlain} {
 		var hits atomic.Int32
-		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			hits.Add(1)
 			http.Redirect(w, r, "https://[::1]:1/", http.StatusFound)
 		}))
-		// The browser client negotiates HTTP/2 through ALPN and stalls on a
-		// test server that only speaks HTTP/1.1.
-		server.EnableHTTP2 = true
-		server.StartTLS()
 
-		client := newHTTPCloakClient(
+		client := mustHTTPCloakClient(
+			t,
 			Config{InsecureSkipVerify: true, Timeout: 5 * time.Second},
 			allowOnlyAddr(serverAddr(t, server)),
 		)
 		_, err := client.Do(OutboundRequest{
-			Client:  kind,
-			URL:     server.URL,
-			Method:  http.MethodGet,
-			Timeout: 5 * time.Second,
+			Client:     kind,
+			URL:        server.URL,
+			Method:     http.MethodGet,
+			Timeout:    5 * time.Second,
+			ForceHTTP1: true,
 		})
 		client.Close()
 		server.Close()
@@ -149,6 +159,46 @@ func TestHTTPCloakClientBlocksRedirectToBlockedAddr(t *testing.T) {
 		if hits.Load() != 1 {
 			t.Errorf("client %d: server hits = %d, want 1", kind, hits.Load())
 		}
+	}
+}
+
+// TestHTTPCloakClientBlocksDNSRebinding simulates a DNS record that is public
+// when the relay checks it and private when the client connects: the check's
+// lookup says localhost is 1.1.1.1, and the real lookup at connect time says
+// 127.0.0.1. The connect-time check must refuse it.
+func TestHTTPCloakClientBlocksDNSRebinding(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "https://localhost:" + serverURL.Port() + "/"
+
+	for _, kind := range []OutboundClientKind{OutboundClientBrowser, OutboundClientPlain} {
+		client := mustHTTPCloakClient(t, Config{InsecureSkipVerify: true, Timeout: 5 * time.Second}, publicAddr)
+		client.lookupNetIP = fakeLookup(map[string][]string{"localhost": {"1.1.1.1"}})
+
+		_, err := client.Do(OutboundRequest{
+			Client:     kind,
+			URL:        target,
+			Method:     http.MethodGet,
+			Timeout:    5 * time.Second,
+			ForceHTTP1: true,
+		})
+		client.Close()
+
+		if err == nil {
+			t.Errorf("client %d: err = nil, want connect refused by the guard", kind)
+		}
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("server hits = %d, want 0", hits.Load())
 	}
 }
 
