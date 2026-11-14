@@ -40,6 +40,11 @@ run = "go build -o tsnet-http-relay ."
 description = "Cross-compile Linux amd64 binary"
 run = "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o dist/tsnet-http-relay-linux-amd64 ."
 
+[tasks.deploy]
+description = "Build and deploy the Linux binary to mediasrv through Rex"
+depends = ["build-linux-amd64"]
+run = "scripts/deploy-mediasrv.sh"
+
 [tasks.clean]
 description = "Remove build outputs"
 run = "rm -f tsnet-http-relay"
