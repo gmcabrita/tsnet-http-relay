@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	github.com/sardanioss/httpcloak v1.7.3
-	tailscale.com v1.104.6
+	tailscale.com v1.104.7
 )
 
 require (
